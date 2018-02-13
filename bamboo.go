@@ -1,7 +1,18 @@
 package bamboo
 
 import (
+	"flag"
+	"fmt"
 	"gopkg.in/yaml.v2"
+	"io/ioutil"
+	"log"
+	"os"
+	"strings"
+)
+
+const (
+	AgentId               = `${bamboo_agentId}`
+	BuildWorkingDirectory = `${bamboo_build_working_directory}`
 )
 
 type Plan struct {
@@ -114,4 +125,58 @@ func (s *Spec) Build() (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func Main(s *Spec) {
+	run := flag.Bool("run", false, "run tasks locally")
+	flag.Parse()
+
+	color := func(c int, v ...interface{}) string {
+		args := []interface{}{fmt.Sprintf("\x1b[%dm", c)}
+		args = append(args, v...)
+		args = append(args, "\x1b[0m")
+		return fmt.Sprint(args...)
+	}
+	print := func(v ...interface{}) {
+		log.Print(color(32, v...))
+	}
+	fatal := func(v ...interface{}) {
+		log.Fatal(color(31, v...))
+	}
+
+	if *run {
+		subst := map[string]string{
+			AgentId: "12345",
+		}
+		for k, v := range subst {
+			print("substitute ", k, " with ", v)
+		}
+		for _, stage := range s.Stages {
+			for _, job := range stage.Jobs {
+				script := func() string {
+					file, err := ioutil.TempFile("", "bamboo")
+					if err != nil {
+						fatal(err)
+					}
+					defer file.Close()
+					for _, script := range job.Scripts {
+						for k, v := range subst {
+							script = strings.Replace(script, k, v, -1)
+						}
+						fmt.Fprintln(file, script)
+						print(script)
+					}
+					return file.Name()
+				}()
+				print("wrote ", script)
+			}
+		}
+		return
+	}
+
+	output, err := s.Build()
+	if err != nil {
+		fatal(err)
+	}
+	fmt.Fprint(os.Stdout, output)
 }
